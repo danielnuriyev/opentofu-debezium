@@ -43,8 +43,8 @@ Check Debezium Connect and connector status:
 export KUBECONFIG=../opentofu-kind/.kubeconfig
 kubectl get pods -n debezium
 
-kubectl port-forward -n debezium svc/debezium-connect 8083:8083
-curl http://localhost:8083/connectors/mongodb-local-test/status
+kubectl port-forward -n debezium svc/debezium-connect 8081:8083
+curl http://localhost:8081/connectors/mongodb-local-test/status
 ```
 
 Insert a document into MongoDB:

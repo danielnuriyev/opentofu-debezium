@@ -70,10 +70,10 @@ resource "null_resource" "debezium" {
       trap 'if [ -n "$PF_PID" ]; then kill "$PF_PID" 2>/dev/null || true; fi' EXIT
       connect_ready=false
       for i in $(seq 1 30); do
-        kubectl --kubeconfig="${local.kubeconfig}" port-forward -n debezium svc/debezium-connect 18083:8083 >/tmp/debezium-pf.log 2>&1 &
+        kubectl --kubeconfig="${local.kubeconfig}" port-forward -n debezium svc/debezium-connect 8081:8083 >/tmp/debezium-pf.log 2>&1 &
         PF_PID=$!
         for j in $(seq 1 10); do
-          if curl -sf http://127.0.0.1:18083/ >/dev/null; then
+          if curl -sf http://127.0.0.1:8081/ >/dev/null; then
             echo "debezium connect api ready"
             connect_ready=true
             break 2
@@ -92,22 +92,22 @@ resource "null_resource" "debezium" {
       fi
 
       # Create the connector on first apply, or update its config on subsequent applies.
-      if curl -sf "http://127.0.0.1:18083/connectors/${local.connector_name}" >/dev/null; then
+      if curl -sf "http://127.0.0.1:8081/connectors/${local.connector_name}" >/dev/null; then
         curl -sf -X PUT -H "Content-Type: application/json" \
           --data "$(python3 -c 'import json; print(json.dumps(json.load(open("${local.connector_file}"))["config"]))')" \
-          "http://127.0.0.1:18083/connectors/${local.connector_name}/config"
+          "http://127.0.0.1:8081/connectors/${local.connector_name}/config"
         echo "connector updated"
       else
         curl -sf -X POST -H "Content-Type: application/json" \
           --data "@${local.connector_file}" \
-          "http://127.0.0.1:18083/connectors"
+          "http://127.0.0.1:8081/connectors"
         echo "connector created"
       fi
 
       # Poll connector status until both the connector and its task are RUNNING.
       connector_ready=false
       for i in $(seq 1 60); do
-        connector_state=$(curl -sf "http://127.0.0.1:18083/connectors/${local.connector_name}/status" | python3 -c "import sys,json; d=json.load(sys.stdin); t=d.get('tasks') or []; print(d['connector']['state'], t[0]['state'] if t else 'NONE')")
+        connector_state=$(curl -sf "http://127.0.0.1:8081/connectors/${local.connector_name}/status" | python3 -c "import sys,json; d=json.load(sys.stdin); t=d.get('tasks') or []; print(d['connector']['state'], t[0]['state'] if t else 'NONE')")
         echo "connector status: $connector_state"
         if [ "$connector_state" = "RUNNING RUNNING" ]; then
           echo "connector ready"

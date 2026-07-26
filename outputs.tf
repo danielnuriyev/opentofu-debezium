@@ -4,8 +4,8 @@ output "kubeconfig" {
 }
 
 output "connect_url" {
-  description = "Debezium Connect REST API (via port-forward to localhost:8083)"
-  value       = "http://localhost:8083"
+  description = "Debezium Connect REST API (via port-forward to localhost:8081)"
+  value       = "http://localhost:8081"
 }
 
 output "connector_name" {
@@ -24,8 +24,8 @@ output "verify" {
     export KUBECONFIG=${local.kubeconfig}
 
     kubectl get pods -n debezium
-    kubectl port-forward -n debezium svc/debezium-connect 8083:8083
-    curl http://localhost:8083/connectors/${local.connector_name}/status
+    kubectl port-forward -n debezium svc/debezium-connect 8081:8083
+    curl http://localhost:8081/connectors/${local.connector_name}/status
 
     # insert a document
     kubectl exec -n mongodb deploy/mongodb -- mongosh "mongodb://root:example@localhost:27017/dev?authSource=admin&replicaSet=rs0&retryWrites=false" --eval 'db.test.insertOne({source: "debezium-verify", ts: new Date()})'
