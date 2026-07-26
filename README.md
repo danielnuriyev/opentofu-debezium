@@ -15,9 +15,9 @@ Deploys [Debezium Connect](https://debezium.io/) on the Kind cluster and streams
 
 Deploy these first (in order):
 
-1. [opentofu-kind](../opentofu-kind) — Kind cluster
-2. [opentofu-mongodb](../opentofu-mongodb) — MongoDB as a single-node replica set (`rs0`)
-3. [opentofu-kafka](../opentofu-kafka) — Kafka broker
+1. [opentofu-kind](https://github.com/danielnuriyev/opentofu-kind) — Kind cluster
+2. [opentofu-mongodb](https://github.com/danielnuriyev/opentofu-mongodb) — MongoDB as a single-node replica set (`rs0`)
+3. [opentofu-kafka](https://github.com/danielnuriyev/opentofu-kafka) — Kafka broker
 
 Also requires:
 
@@ -31,11 +31,6 @@ MongoDB must run as a replica set for Debezium change streams. `opentofu-mongodb
 ## Deploy
 
 ```bash
-cd ../opentofu-kind && tofu apply
-cd ../opentofu-mongodb && tofu apply
-cd ../opentofu-kafka && tofu apply
-
-cd ../opentofu-debezium
 tofu init
 tofu apply
 ```
