@@ -1,0 +1,112 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: debezium
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: debezium-connect
+  namespace: debezium
+  labels:
+    app: debezium-connect
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: debezium-connect
+  template:
+    metadata:
+      labels:
+        app: debezium-connect
+    spec:
+      initContainers:
+        - name: create-topics
+          image: apache/kafka:4.3.1
+          env:
+            - name: BOOTSTRAP
+              value: kafka.kafka.svc.cluster.local:9092
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              for t in debezium_connect_configs:1:compact debezium_connect_offsets:25:compact debezium_connect_statuses:5:compact; do
+                topic="${t%%:*}"
+                rest="${t#*:}"
+                parts="${rest%%:*}"
+                policy="${rest##*:}"
+                if ! /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$BOOTSTRAP" --describe --topic "$topic" >/dev/null 2>&1; then
+                  /opt/kafka/bin/kafka-topics.sh --bootstrap-server "$BOOTSTRAP" --create --topic "$topic" --partitions "$parts" --replication-factor 1 --config cleanup.policy="$policy"
+                fi
+                /opt/kafka/bin/kafka-configs.sh --bootstrap-server "$BOOTSTRAP" --alter --entity-type topics --entity-name "$topic" --add-config cleanup.policy="$policy"
+                echo "ready $topic (partitions=$parts, cleanup=$policy)"
+              done
+      containers:
+        - name: connect
+          image: quay.io/debezium/connect:3.1.3.Final
+          ports:
+            - containerPort: 8083
+              name: http
+          env:
+            - name: BOOTSTRAP_SERVERS
+              value: kafka.kafka.svc.cluster.local:9092
+            - name: GROUP_ID
+              value: debezium
+            - name: CONFIG_STORAGE_TOPIC
+              value: debezium_connect_configs
+            - name: OFFSET_STORAGE_TOPIC
+              value: debezium_connect_offsets
+            - name: STATUS_STORAGE_TOPIC
+              value: debezium_connect_statuses
+            - name: CONFIG_STORAGE_REPLICATION_FACTOR
+              value: "1"
+            - name: OFFSET_STORAGE_REPLICATION_FACTOR
+              value: "1"
+            - name: STATUS_STORAGE_REPLICATION_FACTOR
+              value: "1"
+            - name: KEY_CONVERTER
+              value: org.apache.kafka.connect.json.JsonConverter
+            - name: VALUE_CONVERTER
+              value: org.apache.kafka.connect.json.JsonConverter
+            - name: KEY_CONVERTER_SCHEMAS_ENABLE
+              value: "false"
+            - name: VALUE_CONVERTER_SCHEMAS_ENABLE
+              value: "false"
+            - name: OFFSET_FLUSH_INTERVAL_MS
+              value: "5000"
+            - name: CONNECT_PLUGIN_DISCOVERY
+              value: "only_scan"
+            - name: KAFKA_HEAP_OPTS
+              value: "-Xms256m -Xmx512m"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8083
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            failureThreshold: 18
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1024Mi"
+              cpu: "1000m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: debezium-connect
+  namespace: debezium
+  labels:
+    app: debezium-connect
+spec:
+  selector:
+    app: debezium-connect
+  ports:
+    - name: http
+      port: 8083
+      targetPort: 8083
