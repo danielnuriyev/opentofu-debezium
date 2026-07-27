@@ -19,11 +19,6 @@ Deploy these first (in order):
 2. [opentofu-mongodb](https://github.com/danielnuriyev/opentofu-mongodb) — MongoDB as a single-node replica set (`rs0`)
 3. [opentofu-kafka](https://github.com/danielnuriyev/opentofu-kafka) — Kafka broker
 
-Also requires:
-
-- kubectl: `brew install kubectl`
-- [OpenTofu](https://opentofu.org/) 1.12.5+: `brew install opentofu`
-
 MongoDB must run as a replica set for Debezium change streams. `opentofu-mongodb` configures `--replSet rs0` and initializes the replica set on apply.
 
 > **Database name:** Use `dev.test`, not `local.test`. MongoDB reserves the internal `local` database and change streams cannot run on it.
@@ -73,6 +68,12 @@ You should see a Debezium JSON envelope with the document in the `payload.after`
 ```text
 MongoDB dev.test  →  Debezium MongoDB connector  →  Kafka topic test
 (replica set rs0)      (change streams + snapshot)
+```
+
+If you redeploy Kafka (`opentofu-kafka`), Debezium's internal Connect topics are wiped. Re-register the connector:
+
+```bash
+tofu apply -replace=null_resource.debezium
 ```
 
 ## Cleanup
