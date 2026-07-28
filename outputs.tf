@@ -28,9 +28,9 @@ output "verify" {
     curl http://localhost:8081/connectors/${local.connector_name}/status
 
     # insert a document
-    kubectl exec -n mongodb deploy/mongodb -- mongosh "mongodb://root:example@localhost:27017/dev?authSource=admin&replicaSet=rs0&retryWrites=false" --eval 'db.test.insertOne({source: "debezium-verify", ts: new Date()})'
+    kubectl exec -n mongodb mongodb-0 -- mongosh "mongodb://root:example@localhost:27017/dev?authSource=admin&replicaSet=rs0&retryWrites=false" --eval 'db.test.insertOne({source: "debezium-verify", ts: new Date()})'
 
     # read from kafka topic test
-    kubectl exec -n kafka deploy/kafka -- /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic test --from-beginning --max-messages 1 --timeout-ms 30000
+    kubectl exec -n kafka kafka-0 -c kafka -- /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic test --from-beginning --max-messages 1 --timeout-ms 30000
   EOT
 }

@@ -10,14 +10,18 @@ Deploys [Debezium Connect](https://debezium.io/) on the Kind cluster and streams
 - Runs Kafka Connect with Debezium (`quay.io/debezium/connect:3.1.3.Final`)
 - Registers a MongoDB connector for `dev.test` → Kafka topic `test`
 - Captures existing documents via initial snapshot, then streams inserts/updates/deletes
+- Exposes Connect JVM and Kafka Connect JMX metrics to Prometheus via `jmx-exporter` sidecar and a `ServiceMonitor` (requires [opentofu-monitoring](../opentofu-monitoring))
 
 ## Prerequisites
 
 Deploy these first (in order):
 
 1. [opentofu-kind](https://github.com/danielnuriyev/opentofu-kind) — Kind cluster
-2. [opentofu-mongodb](https://github.com/danielnuriyev/opentofu-mongodb) — MongoDB as a single-node replica set (`rs0`)
-3. [opentofu-kafka](https://github.com/danielnuriyev/opentofu-kafka) — Kafka broker
+2. [opentofu-monitoring](../opentofu-monitoring) — Prometheus Operator (ServiceMonitor CRD)
+3. [opentofu-mongodb](https://github.com/danielnuriyev/opentofu-mongodb) — MongoDB as a 3-member replica set (`rs0`)
+4. [opentofu-kafka](https://github.com/danielnuriyev/opentofu-kafka) — Kafka broker
+
+Deploy monitoring before Debezium if you want Prometheus scraping on first apply.
 
 MongoDB must run as a replica set for Debezium change streams. `opentofu-mongodb` configures `--replSet rs0` and initializes the replica set on apply.
 
@@ -45,7 +49,7 @@ curl http://localhost:8081/connectors/mongodb-local-test/status
 Insert a document into MongoDB:
 
 ```bash
-kubectl exec -n mongodb deploy/mongodb -- mongosh \
+kubectl exec -n mongodb mongodb-0 -- mongosh \
   "mongodb://root:example@localhost:27017/dev?authSource=admin&replicaSet=rs0&retryWrites=false" \
   --eval 'db.test.insertOne({source: "debezium-verify", ts: new Date()})'
 ```
@@ -53,7 +57,7 @@ kubectl exec -n mongodb deploy/mongodb -- mongosh \
 Read the change event from Kafka:
 
 ```bash
-kubectl exec -n kafka deploy/kafka -- /opt/kafka/bin/kafka-console-consumer.sh \
+kubectl exec -n kafka kafka-0 -c kafka -- /opt/kafka/bin/kafka-console-consumer.sh \
   --bootstrap-server localhost:9092 \
   --topic test \
   --from-beginning \

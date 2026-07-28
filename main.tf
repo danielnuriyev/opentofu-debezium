@@ -13,16 +13,13 @@ terraform {
   }
 }
 
-# Paths and connector identity used by apply and destroy provisioners.
 locals {
   kubeconfig     = "${path.module}/../opentofu-kind/.kubeconfig"
   connector_name = "mongodb-local-test"
   connector_file = "${path.module}/connector.json"
 }
 
-# Deploy Debezium Connect and register the MongoDB CDC connector via kubectl and the Connect REST API.
 resource "null_resource" "debezium" {
-  # Re-run apply when manifests, connector config, or kubeconfig change; preserve values for destroy.
   triggers = {
     manifest       = filemd5("${path.module}/debezium.yaml")
     connector      = filemd5(local.connector_file)
@@ -34,20 +31,20 @@ resource "null_resource" "debezium" {
 
   provisioner "local-exec" {
     command = <<-EOT
-      # Exit immediately on errors, unset variables, or pipeline failures.
       set -euo pipefail
 
-      # Require the Kind cluster kubeconfig from opentofu-kind.
       test -f "${local.kubeconfig}" || { echo "Kubeconfig not found. Run tofu apply in opentofu-kind first."; exit 1; }
-
-      # Require MongoDB and Kafka to be deployed before Debezium can connect to them.
+      kubectl --kubeconfig="${local.kubeconfig}" get namespace minio >/dev/null || { echo "MinIO namespace not found. Run tofu apply in opentofu-minio first."; exit 1; }
       kubectl --kubeconfig="${local.kubeconfig}" get namespace mongodb >/dev/null || { echo "MongoDB namespace not found. Run tofu apply in opentofu-mongodb first."; exit 1; }
       kubectl --kubeconfig="${local.kubeconfig}" get namespace kafka >/dev/null || { echo "Kafka namespace not found. Run tofu apply in opentofu-kafka first."; exit 1; }
+      kubectl --kubeconfig="${local.kubeconfig}" get crd servicemonitors.monitoring.coreos.com >/dev/null || {
+        echo "ServiceMonitor CRD not found. Run tofu apply in opentofu-monitoring first."
+        exit 1
+      }
 
-      # Wait up to 2 minutes for MongoDB replica set primary; CDC requires a writable primary.
       primary_ready=false
       for i in $(seq 1 60); do
-        if kubectl --kubeconfig="${local.kubeconfig}" exec -n mongodb deploy/mongodb -- mongosh "mongodb://root:example@localhost:27017/?authSource=admin" --quiet --eval 'db.hello().isWritablePrimary' 2>/dev/null | grep -q true; then
+        if kubectl --kubeconfig="${local.kubeconfig}" exec -n mongodb mongodb-0 -c mongodb -- mongosh -u root -p example --authenticationDatabase admin --quiet --eval 'rs.status().members.some(m => m.stateStr === "PRIMARY")' 2>/dev/null | grep -q true; then
           echo "mongodb replica set primary ready"
           primary_ready=true
           break
@@ -59,13 +56,10 @@ resource "null_resource" "debezium" {
         exit 1
       fi
 
-      # If a prior debezium namespace is still terminating, wait for it to finish before re-applying.
       kubectl --kubeconfig="${local.kubeconfig}" wait --for=delete namespace/debezium --timeout=120s 2>/dev/null || true
-      # Deploy Debezium Connect and wait until its pod is ready.
       kubectl --kubeconfig="${local.kubeconfig}" apply -f "${path.module}/debezium.yaml"
       kubectl --kubeconfig="${local.kubeconfig}" wait --for=condition=ready pod -l app=debezium-connect -n debezium --timeout=300s
 
-      # Port-forward the Connect REST API to localhost so curl can register the connector.
       PF_PID=""
       trap 'if [ -n "$PF_PID" ]; then kill "$PF_PID" 2>/dev/null || true; fi' EXIT
       connect_ready=false
@@ -91,7 +85,6 @@ resource "null_resource" "debezium" {
         exit 1
       fi
 
-      # Create the connector on first apply, or update its config on subsequent applies.
       if curl -sf "http://127.0.0.1:8081/connectors/${local.connector_name}" >/dev/null; then
         curl -sf -X PUT -H "Content-Type: application/json" \
           --data "$(python3 -c 'import json; print(json.dumps(json.load(open("${local.connector_file}"))["config"]))')" \
@@ -104,7 +97,6 @@ resource "null_resource" "debezium" {
         echo "connector created"
       fi
 
-      # Poll connector status until both the connector and its task are RUNNING.
       connector_ready=false
       for i in $(seq 1 60); do
         connector_state=$(curl -sf "http://127.0.0.1:8081/connectors/${local.connector_name}/status" | python3 -c "import sys,json; d=json.load(sys.stdin); t=d.get('tasks') or []; print(d['connector']['state'], t[0]['state'] if t else 'NONE')")
@@ -120,10 +112,26 @@ resource "null_resource" "debezium" {
         echo "Debezium connector did not become RUNNING"
         exit 1
       fi
+
+      debezium_targets_up=false
+      for i in $(seq 1 36); do
+        if kubectl --kubeconfig="${local.kubeconfig}" exec -n monitoring \
+          prometheus-kube-prometheus-prometheus-0 -c prometheus -- \
+          wget -qO- 'http://localhost:9090/api/v1/query?query=up{service="debezium-connect"}' 2>/dev/null \
+          | grep -q '"value":\[.*,"1"\]'; then
+          echo "debezium-connect prometheus target up"
+          debezium_targets_up=true
+          break
+        fi
+        sleep 5
+      done
+      if [ "$debezium_targets_up" != true ]; then
+        echo "Debezium Connect Prometheus target did not become ready (check Prometheus targets UI)"
+        exit 1
+      fi
     EOT
   }
 
-  # Remove Debezium Kubernetes resources on tofu destroy.
   provisioner "local-exec" {
     when    = destroy
     command = <<-EOT
